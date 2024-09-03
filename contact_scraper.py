@@ -15,17 +15,6 @@ import streamlit as st
 # Suppress only the single InsecureRequestWarning from urllib3 needed to silence the warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Function to validate and filter emails
-def is_valid_email(email):
-    pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
-    invalid_patterns = ['@2x', '@3x', '@example.com', '.png', '.jpg', '.jpeg', '.gif', '.bmp']
-    if pattern.match(email):
-        for invalid_pattern in invalid_patterns:
-            if invalid_pattern in email:
-                return False
-        return True
-    return False
-
 # Function to validate and filter phone numbers
 def is_valid_phone(phone):
     # Adjusted regex pattern to match various phone number formats, including extensions
@@ -52,14 +41,14 @@ def get_all_links_from_url(url, session):
         print(f"Error fetching links from {url}: {e}")
         return set()
 
-# Function to get emails and phone numbers from specific pages like "contact us", "about us"
-def get_contact_info_from_specific_pages(base_url, links, session, unique_emails, unique_phones):
+# Function to get phone numbers from specific pages like "contact us", "about us"
+def get_contact_info_from_specific_pages(base_url, links, session, unique_phones):
     target_pages = ['contact', 'about', 'get-in-touch', 'contact-us', 'about-us']
     contacts = []
     for link in links:
         for target in target_pages:
             if target in link.lower():
-                found_contacts = get_contact_info_from_url(link, session, unique_emails, unique_phones)
+                found_contacts = get_contact_info_from_url(link, session, unique_phones)
                 contacts.extend(found_contacts)
                 break
         try:
@@ -69,27 +58,24 @@ def get_contact_info_from_specific_pages(base_url, links, session, unique_emails
             text = soup.get_text().lower()
             for target in target_pages:
                 if target in text:
-                    found_contacts = get_contact_info_from_url(link, session, unique_emails, unique_phones)
+                    found_contacts = get_contact_info_from_url(link, session, unique_phones)
                     contacts.extend(found_contacts)
                     break
         except Exception as e:
             print(f"Error parsing {link}: {e}")
     return contacts
 
-def get_contact_info_from_url(url, session, unique_emails, unique_phones):
+def get_contact_info_from_url(url, session, unique_phones):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'}
     try:
         response = session.get(url, timeout=10, verify=False, headers=headers)
         response.raise_for_status()
-        emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', response.text)
-        valid_emails = [email for email in emails if is_valid_email(email) and email not in unique_emails]
-        unique_emails.update(valid_emails)
-        
+
         phones = re.findall(r'(\+?\d{1,2}\s?)?(\(?\d{3}\)?|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?:\s?(?:ext|x|ext.)\s?\d{1,5})?', response.text)
         valid_phones = [phone[0] for phone in phones if is_valid_phone(phone[0]) and phone[0] not in unique_phones]
         unique_phones.update(valid_phones)
-        
-        return [(url, email, 'email') for email in valid_emails] + [(url, phone, 'phone') for phone in valid_phones]
+
+        return [(url, phone, 'phone') for phone in valid_phones]
     except (RequestException, MaxRetryError, NewConnectionError, SSLError, HTTPError, ConnectionError) as e:
         print(f"Error fetching contact info from {url}: {e}")
         return []
@@ -98,7 +84,6 @@ def get_contact_info_from_url(url, session, unique_emails, unique_phones):
 def scrape_contact_info(urls):
     contact_data = []
     visited_urls = set()
-    unique_emails = set()
     unique_phones = set()
     start_time = time.time()
     max_time = 240  # Maximum time to spend on scraping in seconds
@@ -118,7 +103,7 @@ def scrape_contact_info(urls):
 
         # Visit each URL and search for emails and phone numbers
         base_url = '{uri.scheme}://{uri.netloc}'.format(uri=urlparse(url))
-        contacts = get_contact_info_from_url(url, session, unique_emails, unique_phones)
+        contacts = get_contact_info_from_url(url, session, unique_phones)
         if contacts:
             for contact in contacts:
                 if contact not in contact_data:
@@ -127,7 +112,7 @@ def scrape_contact_info(urls):
         visited_urls.add(url)
 
         all_links = get_all_links_from_url(url, session)
-        target_contacts = get_contact_info_from_specific_pages(base_url, all_links, session, unique_emails, unique_phones)
+        target_contacts = get_contact_info_from_specific_pages(base_url, all_links, session, unique_phones)
         for contact in target_contacts:
             if contact not in contact_data:
                 contact_data.append(contact)
@@ -136,7 +121,7 @@ def scrape_contact_info(urls):
             if time.time() - start_time > max_time:
                 break
             if link not in visited_urls:
-                contacts = get_contact_info_from_url(link, session, unique_emails, unique_phones)
+                contacts = get_contact_info_from_url(link, session, unique_phones)
                 if contacts:
                     for contact in contacts:
                         if contact not in contact_data:
@@ -159,11 +144,11 @@ def save_contact_info_to_csv(contact_data):
 # Streamlit app
 def main():
     st.title('Contact Info Scraper')
-    st.write('Enter URLs to scrape for emails and phone numbers:')
-    
+    st.write('Enter URLs to scrape for phone numbers:')
+
     urls_input = st.text_area('Enter one URL per line:')
     urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
-    
+
     if st.button('Scrape Contacts'):
         with st.spinner('Scraping contacts...'):
             contact_data = scrape_contact_info(urls)
